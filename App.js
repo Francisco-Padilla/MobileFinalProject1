@@ -1,11 +1,12 @@
 //import * as React from 'react';
 import React,{useState, useEffect} from "react";
-import { StyleSheet,Text, View, TextInput, Pressable ,Image, SafeAreaView, Button  } from 'react-native';
+import { StyleSheet,Text, View, TextInput, Pressable ,Image, SafeAreaView, Button,ScrollView,Linking,Alert  } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
 import DateTimePicker from '@react-native-community/datetimepicker';	
 import D_Image from './assets/pots.jpg';
+import * as SQLite from "expo-sqlite";
 
 import { LogBox } from 'react-native';
 
@@ -13,9 +14,34 @@ LogBox.ignoreLogs([
   'Non-serializable values were found in the navigation state',
 ]);
 
+function openDatabase() {
+  if (Platform.OS === "web") {
+    return {
+      transaction: () => {
+        return {
+          executeSql: () => {},
+        };
+      },
+    };
+  }
+
+  const db = SQLite.openDatabase("db.db");
+  return db;
+}
+
+const db = openDatabase();
+
+
+
 function HomeScreen({ navigation }) {
   const [number, changenumber] = React.useState()
   const D_IMAGE = Image.resolveAssetSource(D_Image).uri;
+
+  const handlePress = () => {
+    const query = 'Date of last freeze in Lincoln, NE'; 
+    const url = `https://www.google.com/search?q=${query}`;
+    Linking.openURL(url);
+  };
   return (
     <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#7BA872' }}>  
       <Text style={styles.pageTitle}>Getting Ready For Spring</Text>
@@ -32,6 +58,12 @@ function HomeScreen({ navigation }) {
       >
         <Text style={styles.buttonText} >Enter Data</Text>
       </Pressable>
+
+      <Pressable 
+      style ={styles.button}
+      onPress={handlePress}>
+      <Text style={styles.buttonTextFour} >Google Last Frost Date</Text>
+      </Pressable>
      
     </View>
   );
@@ -41,7 +73,9 @@ function DataEntry({ navigation }) {
   const [number, changenumber] = React.useState();
   const [seed, changeseed] = useState('Corn');
   const [datePicker, setDatePicker] = useState(false); // For Date
+  const [forceUpdate, forceUpdateId] = useForceUpdate(); //Old
   const [date, setDate] = useState(new Date());//For Date
+  const [date2, setDate2] = useState(new Date());
 
   function showDatePicker() {
     setDatePicker(true);
@@ -50,6 +84,46 @@ function DataEntry({ navigation }) {
   function onDateSelected(event, value) {
     setDate(value);
     setDatePicker(false);
+  };
+ 
+  const handleInputChange = (number, date, seed) => {
+    // Check if the entered text is a valid positive or negative whole number
+    if (/^[+-]?\d+$/.test(number) && (seed !== '')) {
+      changenumber(number);
+      calculateDate(date,number,seed);
+    } else {
+      Alert.alert('Invalid input', 'Please enter Plant Name or a valid positive or negative whole number');
+    }
+  };
+
+
+   function calculateDate(date, number,seed)  {
+         const newDate = new Date(date);
+          newDate.setDate(newDate.getDate(date) + parseInt(number));
+          setDate2(newDate);
+          //addingDate2(newDate);
+        add(seed,number,date,newDate)  
+   };
+  
+  const add = (seed, number,date,date2) => {
+    // is text empty?
+    //if (text === null || text === "") {
+    //  return false;
+    //}
+
+     const dates = date.toDateString();
+     const date3 = date2.toDateString();
+     
+    db.transaction(
+      (tx) => {
+        tx.executeSql("insert into items (seed, number, FrostDate, actualDate) values (?, ?,?,?)", [seed, number,dates,date3]);
+        tx.executeSql("select * from items", [], (_, { rows }) =>
+          console.log(JSON.stringify(rows))
+        );
+      },
+      null,
+      forceUpdate
+    );
   };
 
   return (
@@ -80,16 +154,20 @@ function DataEntry({ navigation }) {
       />
       <TextInput  style={styles.textinput} placeholder ="Enter time Frame in Days" 
         onChangeText={changenumber}
+        
         value={number}
       />
       <Text style={styles.titleBody}>This timeframe must me in number of days. If asked to plant before frostdate, enter it as a negative number.</Text>
       <Pressable
         style ={styles.buttonThree}
         onPress={() => {
+          handleInputChange(number, date, seed);
+          //calculateDate(date,number,seed);
+          //add(seed, number,date);
           navigation.navigate('Data', {
-            itemId: number,
-            dates: date,
-            seed: seed
+           // itemId: number,
+            //dates: date.toDateString,
+            //seed: seed
           });
         }}
       >
@@ -99,28 +177,67 @@ function DataEntry({ navigation }) {
   );
 }
 
+function useForceUpdate() {
+  const [value, setValue] = useState(0);
+  return [() => setValue(value + 1), value];
+}
+
 function ResultsScreen({ route, navigation }) {
   
-  const { itemId } = route.params;
+  //const { itemId } = route.params;
   const { dates} = route.params;
-  const {seed} = route.params;
+  //const {seed} = route.params;
 
-  const [date2, setDate2] = useState(new Date());
-
-  useEffect(() => {
-         const newDate = new Date(dates);
-          newDate.setDate(newDate.getDate(dates) + parseInt(itemId));
-          setDate2(newDate);
+ // const [date2, setDate2] = useState(new Date());
+  
+ // useEffect(() => {
+  //       const newDate = new Date(dates);
+ //         newDate.setDate(newDate.getDate(dates) + parseInt(itemId));
+  //        setDate2(newDate);
           //addingDate2(newDate);
           
-  }, []);
+ // }, []);
+
+
+  function Items() {
+    const [items, setItems] = useState(null);
+  
+    useEffect(() => {
+      db.transaction((tx) => {
+        tx.executeSql(
+          `select id, seed, number, FrostDate, actualDate, date(FrostDate, '+' || number || 'days') as newDate from items order by seed;`,
+          [],
+          (_, { rows: { _array } }) => setItems(_array)
+        );
+      });
+    }, []);
+  
+   // const heading = doneHeading ? "BMI History" : "Bmi History";
+  
+    if (items === null || items.length === 0) {
+      return null;
+    }
+  
+    return (
+      <View style={styles.sectionContainer}>
+        <Text style={styles.sectionHeading}>Seeds and Planting Date</Text>
+        {items.map(({ id, seed ,number, FrostDate, actualDate, newDate }) => (
+        
+            <Text key={id} style={styles.history} >Plant: {seed}: TimeFrame: {number} days {'\n'} Frost Date: {FrostDate} {'\n'} Planting Date: {actualDate} </Text>
+            
+        ))}
+      </View>
+    );
+  }
   
   return (
     <View style={{ flex: 1, alignItems: 'center', backgroundColor: '#7BA872' }}>
       <Text style={styles.pageTitle}>Getting Ready For Spring</Text>
-      <Text> Last Frost Date {dates.toDateString()}</Text>
-      <Text> Time Frame in Days {itemId}</Text>
-      <Text> Seed Name {seed} Planting Date {date2.toDateString()}</Text>
+      
+      <ScrollView style={styles.listArea}>
+            <Items/> 
+       </ScrollView>
+
     </View>
   );
 }
@@ -130,6 +247,18 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   SplashScreen.preventAutoHideAsync();
   setTimeout(SplashScreen.hideAsync, 2000);
+
+  useEffect(() => {
+    db.transaction((tx) => {
+    //  tx.executeSql(
+     //   "drop table items;"
+     // );
+      tx.executeSql(
+        "create table if not exists items (id integer primary key not null, seed text, number real, FrostDate text, actualDate int);"
+      );
+    });
+  }, []);
+
   return (
     <NavigationContainer>
       <Stack.Navigator>
@@ -241,6 +370,16 @@ const styles = StyleSheet.create({
     paddingTop: 10
     //paddingBottom: 30
   },
+  buttonTextFour: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 15,
+    color: 'white',
+    textAlign: 'center',
+    paddingTop: 10
+    //paddingBottom: 30
+  },
+  
   image: {
     width: 400,
     height: 275,
@@ -255,6 +394,18 @@ const styles = StyleSheet.create({
     width: 320,
     height: 260,
     display: 'flex',
+  },
+  sectionContainer: {
+    width: '100%',
+    marginBottom: 16,
+    marginHorizontal: 16,
+  },
+  sectionHeading: {
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  history: {
+    fontSize: 15
   },
 });
 
